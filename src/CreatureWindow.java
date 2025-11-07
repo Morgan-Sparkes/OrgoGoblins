@@ -1,3 +1,4 @@
+import javafx.stage.Screen;
 import javafx.stage.Stage;
 import javafx.animation.Timeline;
 import javafx.animation.KeyFrame;
@@ -31,22 +32,25 @@ public class CreatureWindow extends Stage {
 
         setScene(scene);
 
-        startMoving();
+        startMovingDesktop();
 
     }
 
-    private void startMoving() {
-        Timeline timeline = new Timeline(
-                new KeyFrame(Duration.millis(500), e -> moveCreature())
-        );
+    private void startMovingDesktop() {
+        Timeline timeline = new Timeline(new  KeyFrame(Duration.millis(500), e -> moveAcrossScreen()));
         timeline.setCycleCount(Timeline.INDEFINITE);
         timeline.play();
+
     }
 
-    private void moveCreature() {
-        double x = random.nextDouble() * (getWidth() - creatureView.getFitWidth());
-        double y = random.nextDouble() * (getHeight() - creatureView.getFitHeight());
-        creatureView.setLayoutX(x);
-        creatureView.setLayoutY(y);
+    private void moveAcrossScreen() {
+        double screenWidth = Screen.getPrimary().getBounds().getWidth();
+        double screenHeight = Screen.getPrimary().getBounds().getHeight();
+
+        double x = random.nextDouble() * (screenWidth - getWidth());
+        double y = random.nextDouble() * (screenHeight - getHeight());
+        setX(x);
+        setY(y);
+
     }
 }
