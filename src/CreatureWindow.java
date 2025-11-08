@@ -8,6 +8,8 @@ import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.Point;
+import java.awt.geom.AffineTransform;
+import java.awt.image.AffineTransformOp;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
@@ -25,7 +27,8 @@ public class CreatureWindow extends JWindow {
     private final Point targetPoint;
     private final Timer timer;
     private final JLabel creatureLabel;
-    private final List<ImageIcon> idleFrames = new ArrayList<>();
+    private final List<ImageIcon> forwardFrames = new ArrayList<>();
+    private final List<ImageIcon> backwardFrames = new ArrayList<>();
     private int currentFrameIndex = 0;
     private double posX;
     private double posY;
@@ -42,8 +45,9 @@ public class CreatureWindow extends JWindow {
 
         creatureLabel = new JLabel();
         loadIdleFrames();
-        if (!idleFrames.isEmpty()) {
-            creatureLabel.setIcon(idleFrames.get(currentFrameIndex));
+        List<ImageIcon> initialFrames = getCurrentFrameList();
+        if (!initialFrames.isEmpty()) {
+            creatureLabel.setIcon(initialFrames.get(currentFrameIndex));
         } else {
             loadFallbackIcon();
         }
@@ -112,6 +116,7 @@ public class CreatureWindow extends JWindow {
     private void handleArrival() {
         if (headingToTarget) {
             headingToTarget = false;
+            switchAnimationDirection();
             timer.stop();
 
             Timer pauseTimer = new Timer(PAUSE_AT_TARGET_MS, e -> {
@@ -159,7 +164,7 @@ public class CreatureWindow extends JWindow {
             }
             try {
                 BufferedImage frame = ImageIO.read(frameFile);
-                idleFrames.add(new ImageIcon(scaleImage(frame, 80, 80)));
+                addFramePair(frame);
                 loaded = true;
             } catch (IOException e) {
                 System.out.println("Unable to load idle frame " + name + ": " + e.getMessage());
@@ -199,8 +204,7 @@ public class CreatureWindow extends JWindow {
                     break;
                 }
                 BufferedImage frame = sheet.getSubimage(frameX, 0, frameWidth, frameHeight);
-                BufferedImage scaled = scaleImage(frame, 80, 80);
-                idleFrames.add(new ImageIcon(scaled));
+                addFramePair(frame);
             }
             currentFrameIndex = 0;
         } catch (IOException e) {
@@ -215,7 +219,11 @@ public class CreatureWindow extends JWindow {
         }
         try {
             BufferedImage fallback = ImageIO.read(fallbackFile);
-            creatureLabel.setIcon(new ImageIcon(scaleImage(fallback, 80, 80)));
+            addFramePair(fallback);
+            List<ImageIcon> frames = getCurrentFrameList();
+            if (!frames.isEmpty()) {
+                creatureLabel.setIcon(frames.get(currentFrameIndex));
+            }
         } catch (IOException e) {
             System.out.println("Unable to load fallback creature icon: " + e.getMessage());
         }
@@ -230,6 +238,22 @@ public class CreatureWindow extends JWindow {
         g2.drawImage(source, 0, 0, width, height, null);
         g2.dispose();
         return scaled;
+    }
+
+    private void addFramePair(BufferedImage frame) {
+        BufferedImage scaledForward = scaleImage(frame, 80, 80);
+        forwardFrames.add(new ImageIcon(scaledForward));
+
+        BufferedImage mirrored = mirrorImage(frame);
+        BufferedImage scaledBackward = scaleImage(mirrored, 80, 80);
+        backwardFrames.add(new ImageIcon(scaledBackward));
+    }
+
+    private BufferedImage mirrorImage(BufferedImage source) {
+        AffineTransform tx = AffineTransform.getScaleInstance(-1, 1);
+        tx.translate(-source.getWidth(), 0);
+        AffineTransformOp op = new AffineTransformOp(tx, AffineTransformOp.TYPE_BILINEAR);
+        return op.filter(source, null);
     }
 
     private int findFirstOpaqueColumn(BufferedImage image) {
@@ -255,7 +279,8 @@ public class CreatureWindow extends JWindow {
     }
 
     private void advanceIdleFrame(double deltaSeconds) {
-        if (idleFrames.isEmpty()) {
+        List<ImageIcon> frames = getCurrentFrameList();
+        if (frames.isEmpty()) {
             return;
         }
         animationAccumulatorSeconds += deltaSeconds;
@@ -263,7 +288,21 @@ public class CreatureWindow extends JWindow {
             return;
         }
         animationAccumulatorSeconds %= IDLE_FRAME_SECONDS;
-        currentFrameIndex = (currentFrameIndex + 1) % idleFrames.size();
-        creatureLabel.setIcon(idleFrames.get(currentFrameIndex));
+        currentFrameIndex = (currentFrameIndex + 1) % frames.size();
+        creatureLabel.setIcon(frames.get(currentFrameIndex));
+    }
+
+    private List<ImageIcon> getCurrentFrameList() {
+        return headingToTarget ? forwardFrames : backwardFrames;
+    }
+
+    private void switchAnimationDirection() {
+        animationAccumulatorSeconds = 0.0;
+        List<ImageIcon> frames = getCurrentFrameList();
+        if (frames.isEmpty()) {
+            return;
+        }
+        currentFrameIndex %= frames.size();
+        creatureLabel.setIcon(frames.get(currentFrameIndex));
     }
 }
