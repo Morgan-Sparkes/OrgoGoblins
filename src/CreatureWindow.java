@@ -1,56 +1,152 @@
-import javafx.stage.Screen;
-import javafx.stage.Stage;
-import javafx.animation.Timeline;
-import javafx.animation.KeyFrame;
-import javafx.scene.Scene;
-import javafx.scene.image.Image;
-import javafx.scene.image.ImageView;
-import javafx.scene.layout.Pane;
-import javafx.stage.StageStyle;
-import javafx.util.Duration;
+import javax.imageio.ImageIO;
+import javax.swing.ImageIcon;
+import javax.swing.JLabel;
+import javax.swing.JWindow;
+import javax.swing.Timer;
+import java.awt.BorderLayout;
+import java.awt.Color;
+import java.awt.Image;
+import java.awt.Point;
+import java.awt.image.BufferedImage;
+import java.io.File;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 
-import java.util.Random;
+public class CreatureWindow extends JWindow {
 
-public class CreatureWindow extends Stage {
+    private static final int TIMER_DELAY_MS = 16;
+    private static final double TIMER_STEP_SECONDS = TIMER_DELAY_MS / 1000.0;
+    private static final double WALK_SPEED_PX_PER_SEC = 220.0;
+    private static final int PAUSE_AT_TARGET_MS = 800;
 
-    private ImageView creatureView;
-    private Random random = new Random();
+    private final Point startPoint;
+    private final Point targetPoint;
+    private final Timer timer;
+    private final Timer animationTimer;
+    private final JLabel creatureLabel;
+    private final List<ImageIcon> idleFrames = new ArrayList<>();
+    private int currentFrameIndex = 0;
+    private double posX;
+    private double posY;
+    private boolean headingToTarget = true;
 
-    public CreatureWindow() {
-        initStyle(StageStyle.TRANSPARENT);
+    public CreatureWindow(Point startPoint, Point targetPoint) {
+        this.startPoint = startPoint;
+        this.targetPoint = targetPoint;
+
         setAlwaysOnTop(true);
+        setBackground(new Color(0, 0, 0, 0));
 
-        Image creatureImage = new Image("file:creature.png");
-        creatureView = new ImageView(creatureImage);
-        creatureView.setFitWidth(80);
-        creatureView.setFitHeight(80);
+        creatureLabel = new JLabel();
+        loadIdleFrames();
+        if (!idleFrames.isEmpty()) {
+            creatureLabel.setIcon(idleFrames.get(currentFrameIndex));
+        } else {
+            ImageIcon fallbackIcon = new ImageIcon("creature.png");
+            Image scaledImage = fallbackIcon.getImage().getScaledInstance(80, 80, Image.SCALE_SMOOTH);
+            creatureLabel.setIcon(new ImageIcon(scaledImage));
+        }
 
-        Pane root = new Pane(creatureView);
+        getContentPane().setLayout(new BorderLayout());
+        getContentPane().add(creatureLabel, BorderLayout.CENTER);
+        pack();
 
-        Scene scene = new Scene(root, 200, 200);
-        scene.setFill(null);
+        posX = startPoint.x - getWidth() / 2.0;
+        posY = startPoint.y - getHeight() / 2.0;
+        setLocation((int) Math.round(posX), (int) Math.round(posY));
 
-        setScene(scene);
-
-        startMovingDesktop();
-
+        timer = new Timer(TIMER_DELAY_MS, e -> stepTowardsGoal());
+        animationTimer = new Timer(100, e -> advanceIdleFrame());
     }
 
-    private void startMovingDesktop() {
-        Timeline timeline = new Timeline(new  KeyFrame(Duration.millis(500), e -> moveAcrossScreen()));
-        timeline.setCycleCount(Timeline.INDEFINITE);
-        timeline.play();
-
+    public void showWindow() {
+        setVisible(true);
+        timer.start();
+        if (!idleFrames.isEmpty()) {
+            animationTimer.start();
+        }
     }
 
-    private void moveAcrossScreen() {
-        double screenWidth = Screen.getPrimary().getBounds().getWidth();
-        double screenHeight = Screen.getPrimary().getBounds().getHeight();
+    @Override
+    public void dispose() {
+        timer.stop();
+        animationTimer.stop();
+        super.dispose();
+    }
 
-        double x = random.nextDouble() * (screenWidth - getWidth());
-        double y = random.nextDouble() * (screenHeight - getHeight());
-        setX(x);
-        setY(y);
+    private void stepTowardsGoal() {
+        Point goal = headingToTarget ? targetPoint : startPoint;
+        double centerX = posX + getWidth() / 2.0;
+        double centerY = posY + getHeight() / 2.0;
+        double dx = goal.x - centerX;
+        double dy = goal.y - centerY;
+        double distance = Math.hypot(dx, dy);
 
+        double stepDistance = WALK_SPEED_PX_PER_SEC * TIMER_STEP_SECONDS;
+        if (distance <= stepDistance || distance == 0) {
+            posX = goal.x - getWidth() / 2.0;
+            posY = goal.y - getHeight() / 2.0;
+            setLocation((int) Math.round(posX), (int) Math.round(posY));
+            handleArrival();
+            return;
+        }
+
+        double ratio = stepDistance / distance;
+        posX += dx * ratio;
+        posY += dy * ratio;
+        setLocation((int) Math.round(posX), (int) Math.round(posY));
+    }
+
+    private void handleArrival() {
+        if (headingToTarget) {
+            headingToTarget = false;
+            timer.stop();
+
+            Timer pauseTimer = new Timer(PAUSE_AT_TARGET_MS, e -> {
+                ((Timer) e.getSource()).stop();
+                timer.start();
+            });
+            pauseTimer.setRepeats(false);
+            pauseTimer.start();
+        } else {
+            timer.stop();
+            Timer pauseTimer = new Timer(PAUSE_AT_TARGET_MS / 2, e -> {
+                ((Timer) e.getSource()).stop();
+                dispose();
+            });
+            pauseTimer.setRepeats(false);
+            pauseTimer.start();
+        }
+    }
+
+    private void loadIdleFrames() {
+        File spriteSheet = new File("spr_idle_strip9.png");
+        if (!spriteSheet.exists()) {
+            return;
+        }
+
+        try {
+            BufferedImage sheet = ImageIO.read(spriteSheet);
+            int frameWidth = 64;
+            int frameHeight = 64;
+            int frameCount = sheet.getWidth() / frameWidth;
+            for (int i = 0; i < frameCount; i++) {
+                BufferedImage frame = sheet.getSubimage(i * frameWidth, 0, frameWidth, frameHeight);
+                Image scaled = frame.getScaledInstance(80, 80, Image.SCALE_SMOOTH);
+                idleFrames.add(new ImageIcon(scaled));
+            }
+            currentFrameIndex = 0;
+        } catch (IOException e) {
+            System.out.println("Unable to load idle sprite sheet: " + e.getMessage());
+        }
+    }
+
+    private void advanceIdleFrame() {
+        if (idleFrames.isEmpty()) {
+            return;
+        }
+        currentFrameIndex = (currentFrameIndex + 1) % idleFrames.size();
+        creatureLabel.setIcon(idleFrames.get(currentFrameIndex));
     }
 }
