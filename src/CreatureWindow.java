@@ -5,7 +5,8 @@ import javax.swing.JWindow;
 import javax.swing.Timer;
 import java.awt.BorderLayout;
 import java.awt.Color;
-import java.awt.Image;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
 import java.awt.Point;
 import java.awt.image.BufferedImage;
 import java.io.File;
@@ -44,9 +45,7 @@ public class CreatureWindow extends JWindow {
         if (!idleFrames.isEmpty()) {
             creatureLabel.setIcon(idleFrames.get(currentFrameIndex));
         } else {
-            ImageIcon fallbackIcon = new ImageIcon("creature.png");
-            Image scaledImage = fallbackIcon.getImage().getScaledInstance(80, 80, Image.SCALE_SMOOTH);
-            creatureLabel.setIcon(new ImageIcon(scaledImage));
+            loadFallbackIcon();
         }
 
         getContentPane().setLayout(new BorderLayout());
@@ -58,6 +57,8 @@ public class CreatureWindow extends JWindow {
         setLocation((int) Math.round(posX), (int) Math.round(posY));
 
         timer = new Timer(TIMER_DELAY_MS, e -> onTick());
+        timer.setCoalesce(false);
+        timer.setInitialDelay(0);
     }
 
     public void showWindow() {
@@ -131,6 +132,43 @@ public class CreatureWindow extends JWindow {
     }
 
     private void loadIdleFrames() {
+        if (loadFramesFromFiles()) {
+            currentFrameIndex = 0;
+            return;
+        }
+        loadFramesFromSpriteSheet();
+    }
+
+    private boolean loadFramesFromFiles() {
+        boolean loaded = false;
+        String[] fileNames = {
+                "GoblinIdle1.png",
+                "GoblinIdle2.png",
+                "GoblinIdle3.png",
+                "GoblinIdle4.png",
+                "GoblinIdle5.png",
+                "GoblinIdle6.png",
+                "GoblinIdle7.png",
+                "GoblinIdle8.png"
+        };
+
+        for (String name : fileNames) {
+            File frameFile = new File(name);
+            if (!frameFile.exists()) {
+                continue;
+            }
+            try {
+                BufferedImage frame = ImageIO.read(frameFile);
+                idleFrames.add(new ImageIcon(scaleImage(frame, 80, 80)));
+                loaded = true;
+            } catch (IOException e) {
+                System.out.println("Unable to load idle frame " + name + ": " + e.getMessage());
+            }
+        }
+        return loaded;
+    }
+
+    private void loadFramesFromSpriteSheet() {
         File spriteSheet = new File("spr_idle_strip9.png");
         if (!spriteSheet.exists()) {
             return;
@@ -140,16 +178,80 @@ public class CreatureWindow extends JWindow {
             BufferedImage sheet = ImageIO.read(spriteSheet);
             int frameWidth = 64;
             int frameHeight = 64;
-            int frameCount = sheet.getWidth() / frameWidth;
+
+            int contentStart = findFirstOpaqueColumn(sheet);
+            int contentEnd = findLastOpaqueColumn(sheet);
+            if (contentStart == -1 || contentEnd == -1 || contentStart > contentEnd) {
+                System.out.println("Idle sprite sheet contains no opaque pixels.");
+                return;
+            }
+
+            int contentWidth = contentEnd - contentStart + 1;
+            int frameCount = contentWidth / frameWidth;
+            if (frameCount <= 0) {
+                System.out.println("Sprite sheet content too narrow for frame width.");
+                return;
+            }
+
             for (int i = 0; i < frameCount; i++) {
-                BufferedImage frame = sheet.getSubimage(i * frameWidth, 0, frameWidth, frameHeight);
-                Image scaled = frame.getScaledInstance(80, 80, Image.SCALE_SMOOTH);
+                int frameX = contentStart + i * frameWidth;
+                if (frameX + frameWidth > sheet.getWidth()) {
+                    break;
+                }
+                BufferedImage frame = sheet.getSubimage(frameX, 0, frameWidth, frameHeight);
+                BufferedImage scaled = scaleImage(frame, 80, 80);
                 idleFrames.add(new ImageIcon(scaled));
             }
             currentFrameIndex = 0;
         } catch (IOException e) {
             System.out.println("Unable to load idle sprite sheet: " + e.getMessage());
         }
+    }
+
+    private void loadFallbackIcon() {
+        File fallbackFile = new File("creature.png");
+        if (!fallbackFile.exists()) {
+            return;
+        }
+        try {
+            BufferedImage fallback = ImageIO.read(fallbackFile);
+            creatureLabel.setIcon(new ImageIcon(scaleImage(fallback, 80, 80)));
+        } catch (IOException e) {
+            System.out.println("Unable to load fallback creature icon: " + e.getMessage());
+        }
+    }
+
+    private BufferedImage scaleImage(BufferedImage source, int width, int height) {
+        BufferedImage scaled = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g2 = scaled.createGraphics();
+        g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+        g2.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g2.drawImage(source, 0, 0, width, height, null);
+        g2.dispose();
+        return scaled;
+    }
+
+    private int findFirstOpaqueColumn(BufferedImage image) {
+        for (int x = 0; x < image.getWidth(); x++) {
+            for (int y = 0; y < image.getHeight(); y++) {
+                if (((image.getRGB(x, y) >> 24) & 0xFF) > 0) {
+                    return x;
+                }
+            }
+        }
+        return -1;
+    }
+
+    private int findLastOpaqueColumn(BufferedImage image) {
+        for (int x = image.getWidth() - 1; x >= 0; x--) {
+            for (int y = 0; y < image.getHeight(); y++) {
+                if (((image.getRGB(x, y) >> 24) & 0xFF) > 0) {
+                    return x;
+                }
+            }
+        }
+        return -1;
     }
 
     private void advanceIdleFrame(double deltaSeconds) {
